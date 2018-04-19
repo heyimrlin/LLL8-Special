@@ -681,6 +681,7 @@ type
     room_download: TMenuItem;
     dev_Download: TMenuItem;
     N10: TMenuItem;
+    AdoPolice: TADOConnection;
     procedure FormCreate(Sender: TObject);
     procedure spBtn_addrClick(Sender: TObject);
     procedure spBtn_devClick(Sender: TObject);
@@ -990,6 +991,8 @@ type
     function D_Card_T_Unit(PersonName,CardNO,UserMac,CmdHead,ValidTime:string;CardType:Integer):Boolean;
     function C_Card_F_Device(CardNO,CmdHead:string;CardType:Integer):Boolean;
 
+    function A_Card_T_FixedCardInfo(CardCode:Integer;RoomCode,OwnerName:string):Boolean;
+
     function Reg_Import_ROP(unitM:string;cType:Integer):Boolean;
     function Reg_Import_SYS(cType:Integer):Boolean;
     function Reg_Import_SELF:Boolean;
@@ -1028,6 +1031,7 @@ var
   IDSH:TIdSocketHandle;
 begin
   if AdoCon.Connected then AdoCon.Close;
+  if AdoPolice.Connected then AdoPolice.Close;
 
   //-----链接数据库-----
   {=1=单机版链接方式}
@@ -1066,6 +1070,7 @@ begin
 
     AppName     := f.ReadString('sysParam','AppName','LEELEN L8-xx小区管理软件');
     DataDocking := f.ReadString('sysParam','DataDocking','false');
+    PoliceDocking := f.ReadString('sysParam','PoliceDocking','false');
     Test        := f.ReadString('sysParam','Test','false');
     PhoneDoor   := f.ReadString('sysParam','PhoneDoor','false');
 
@@ -1097,6 +1102,16 @@ begin
     MainForm.AdoConDock.Connected:=true;
   end;
   //---数据对接数据库配置完毕---
+
+  //---链接PoliceDataSystem数据库---
+  if PoliceDocking = 'true' then
+  begin
+    AdoPolice.LoginPrompt:=false;
+    AdoPolice.KeepConnection:=true;
+    AdoPolice.ConnectionString:='FILE NAME='+Get_CurDir+'\PoliceDock.udl';
+    AdoPolice.Connected:=true;
+  end;
+  //---链接PoliceDataSystem数据库完毕
 
   //---手机开锁功能配置---
   if PhoneDoor = 'true' then
@@ -2544,12 +2559,18 @@ end;
 procedure TMainForm.btn_p_saveClick(Sender: TObject);
 var
   cNO:Integer;
+  UnitMac,UserMac,RoomCode,pName:string;
 begin
   cNO:=StrToInt(DBGridPerson.DataSource.DataSet.FieldByName('CardNO').AsString);
+  pName:=DBGridPerson.DataSource.DataSet.FieldByName('PersonName').AsString;
+  UnitMac:=DBGridPerson.DataSource.DataSet.FieldByName('unitMac').AsString;
+  UserMac:=DBGridPerson.DataSource.DataSet.FieldByName('userMac').AsString;
+  RoomCode:=UnitMac+'-'+UserMac;
 
   if (cNO > 0) and (cNO < 16777215) then
   begin
     DBGridPerson.DataSource.DataSet.Post;
+    A_Card_T_FixedCardInfo(cNO,RoomCode,pName);
   end
   else begin
     DBGridPerson.DataSource.DataSet.Cancel;
@@ -2612,15 +2633,18 @@ var
   pName:string;
   cNO:string;
   s:string;
-  unitStr,userStr:string;
+  unitStr,userStr,RoomCode:string;
+  IntCard:Integer;
   ValidTime:string;
   cMemo:string;
 begin
   pName := AdoQryPerson.FieldByName('PersonName').AsString;
   ValidTime := AdoQryPerson.FieldByName('ValidTime').AsString;
   cNO := AdoQryPerson.FieldByName('CardNO').AsString;
+  IntCard := StrToInt(cNO);
   unitStr:=AdoQryPerson.FieldByName('unitMac').AsString;
   userStr:=AdoQryPerson.FieldByName('userMac').AsString;
+  RoomCode:=unitStr+'-'+userStr;
   cMemo:=AdoQryPerson.FieldByName('CardMemo').AsString;
 
   s := '0000'+IntToHex(StrToInt(cNO),6)+unitStr+GetUserNO6(userStr)+'010A';
@@ -2630,6 +2654,8 @@ begin
 
   AdoCon.Execute('insert into t_cmd(CardNO,cmdStr,unitMac,userMac,sent,cmdType) values('+QuotedStr(cNO)+','+QuotedStr(s)+','+QuotedStr(unitStr)+','+QuotedStr(userStr)+',0,0)');
   AdoCon.Execute('delete A from t_card A where exists(select 1 from t_card where CardNO=A.CardNO and unitMac=A.unitMac and userMac=A.userMac and ID<A.ID)');
+
+  A_Card_T_FixedCardInfo(IntCard,RoomCode,pName);
 
   D_Card_T_Wall(pName,cNO,userStr,'0000',ValidTime,0);
 
@@ -3601,6 +3627,8 @@ begin
           else begin
             AdoCon.Execute('update t_card set CardType='+IntToStr(0)+',userMac='+QuotedStr(userStr)+' where CardNO='+QuotedStr(cNO)+' and unitMac='+QuotedStr(unitStr));
           end;
+
+          A_Card_T_FixedCardInfo(StrToInt(cNO),unitStr+'-'+userStr,pName);
 
           D_Card_T_Wall(pName,cNO,userStr,'0000',ValidTime,0);
           RefreshRec(AdoQryCard,'select * from t_card');
@@ -4776,12 +4804,23 @@ end;
 procedure TMainForm.btn_c_saveClick(Sender: TObject);
 var
   cNO:Integer;
+  UnitMac,UserMac,RoomCode,pName:string;
 begin
   cNO:=StrToInt(DBGridpCard.DataSource.DataSet.FieldByName('CardNO').AsString);
+  pName:=DBGridpCard.DataSource.DataSet.FieldByName('PersonName').AsString;
+  UnitMac:=DBGridpCard.DataSource.DataSet.FieldByName('unitMac').AsString;
+  UserMac:=DBGridpCard.DataSource.DataSet.FieldByName('userMac').AsString;
+  RoomCode:=UnitMac+'-'+UserMac;
 
   if (cNO > 0) and (cNO < 16777215) then
   begin
     DBGridpCard.DataSource.DataSet.Post;
+    AdoCon.Execute('update t_card set PersonName='+QuotedStr(pName)+' where CardNO='+QuotedStr(IntToStr(cNO)));
+
+    if PoliceDocking='true' then
+    begin
+      AdoPolice.Execute('update FixedCardInfo set OwnerName='+QuotedStr(pName)+' where CardCode='+IntToStr(cNO));
+    end;
   end
   else begin
     DBGridpCard.DataSource.DataSet.Cancel;
@@ -5047,11 +5086,12 @@ var
   cINO:Integer;
   cNO:string;
   s:string;
-  unitStr,userStr:string;
+  unitStr,userStr,RoomCode:string;
   ValidTime,cMemo:string;
 begin
   unitStr := edt_UnitMac.Text;
   userStr := edt_UserMac.Text;
+  RoomCode := unitStr+'-'+userStr;
 
   if (unitStr='') or (userStr='') then
   begin
@@ -5091,6 +5131,8 @@ begin
   else begin
     ExecSQL('update t_card set CardType=0,userMac='+QuotedStr(userStr)+',PersonName='+QuotedStr(pName)+',ValidTime='+QuotedStr(ValidTime)+',CardMemo='+QuotedStr(cMemo)+' where CardNO='+QuotedStr(cNO)+' and unitMac='+QuotedStr(unitStr));
   end;
+
+  A_Card_T_FixedCardInfo(cINO,RoomCode,pName);
 
   AdoCon.Execute('insert into t_cmd(CardNO,cmdStr,unitMac,userMac,sent,cmdType) values('+QuotedStr(cNO)+','+QuotedStr(s)+','+QuotedStr(unitStr)+','+QuotedStr(userStr)+',0,0)');
   AdoCon.Execute('delete A from t_card A where exists(select 1 from t_card where CardNO=A.CardNO and unitMac=A.unitMac and userMac=A.userMac and ID<A.ID)');
@@ -5469,6 +5511,7 @@ begin
     ExecSQL('insert into t_card(CardType,CardNO,CardState,unitMac,userMac,CardMemo) values('+IntToStr(cardType)+','+QuotedStr(cardNO)+','+IntToStr(1)+','+QuotedStr(unitMac)+','+QuotedStr(userMac)+','+QuotedStr(deadline)+')')
   else
     ExecSQL('update t_card set CardState=1,CardType='+IntToStr(cardType)+',unitMac='+QuotedStr(unitMac)+',userMac='+QuotedStr(userMac)+'where CardNO='+QuotedStr(cardNO));
+
   RefreshRec(AdoQryCard,'select * from t_card');
 end;
 
@@ -6536,6 +6579,7 @@ begin
       RefreshRec(AdoQryCard,'select * from t_card');
     end;
 
+    A_Card_T_FixedCardInfo(intCard,unitStr+'-'+userStr,lang_labDefaultName);
 
     if Get_RecCount('select * from t_ReadCards where CardNO = '+QuotedStr(IntToStr(intCard))) < 1 then
     begin
@@ -6563,6 +6607,7 @@ var
   cardNO,cardClass:string;
   intCard,intCardClass:integer;
   Card:string;
+  OwnerName,RoomCode,RecTime:string;
 begin
   //4508
   try
@@ -6578,7 +6623,9 @@ begin
     intCard := StrToInt('$'+cardNO);
 
     RefreshRec(AdoQryCard,'select * from t_card where CardNO='+QuotedStr(IntToStr(intCard)));
-    Card := AdoQryCard.FieldByName('PersonName').AsString + '('+IntToStr(intCard)+')';
+    OwnerName := AdoQryCard.FieldByName('PersonName').AsString;
+    RoomCode := AdoQryCard.FieldByName('unitMac').AsString+'-'+AdoQryCard.FieldByName('userMac').AsString;
+    Card := OwnerName + '('+IntToStr(intCard)+')';
     RefreshRec(AdoQryCard,'select * from t_card');
 
     cardClass := midStr(devStr,15,1);  //卡类型
@@ -6597,21 +6644,30 @@ begin
     memo2.Lines.Append(lang_strCardRecord+':'+lang_strUserNo+unitStr+'-'+userStr+','+lang_strCardNo+':'+IntToStr(intCard)+'('+cardNO+'),'+lang_strCardType+':'+cardClass);
 
     RefreshRec(AdoQryCardRec,'select * from t_CardRec order by RecTime DESC,ID DESC');
+
     AdoQryCardRec.Append;
     AdoQryCardRec.FieldByName('CardNO').AsString   := Card;
     AdoQryCardRec.FieldByName('CardType').AsInteger:= intCardClass;
     AdoQryCardRec.FieldByName('RecDev').AsString   := recDev;
+
     if ComType=0 then
-      AdoQryCardRec.FieldByName('RecTime').AsString  := GetCmdTime(MidStr(devStr,27,12))
+      RecTime := GetCmdTime(MidStr(devStr,27,12))
     else if ComType=1 then
-      AdoQryCardRec.FieldByName('RecTime').AsString  := FormatDateTime('YYYY-MM-DD hh:mm',Now());
+      RecTime := FormatDateTime('YYYY-MM-DD hh:mm',Now());
+    AdoQryCardRec.FieldByName('RecTime').AsString := RecTime;
+
     AdoQryCardRec.Post;
     RefreshRec(AdoQryCardRec,'select * from t_CardRec order by RecTime DESC,ID DESC');
 
     AdoQryCardRec.First;
     CurrentID:=AdoQryCardRec.FieldByName('ID').AsInteger;
 
-    if (DataDocking='true') and (Get_RecCount('select * from master.dbo.sysdatabases where name='+QuotedStr('PoliceDataSystem'),AdoConDock)>0) then
+    if (PoliceDocking='true') and ((intCardClass=0) or (intCardClass=1)) then
+    begin
+      AdoPolice.Execute('insert into InPark(CardCode,OwnerName,RoomCode,InParkTime) values('+IntToStr(intCard)+','+QuotedStr(OwnerName)+','+QuotedStr(RoomCode)+','+QuotedStr(RecTime)+')');
+    end;
+
+    {if (DataDocking='true') and (Get_RecCount('select * from master.dbo.sysdatabases where name='+QuotedStr('PoliceDataSystem'),AdoConDock)>0) then
     begin
       AdoConDock.DefaultDatabase:='PoliceDataSystem';
       RefreshRec(AdoQryCardInfo,'select unitMac,userMac from t_card where CardNO='+QuotedStr(IntToStr(intCard))+' and unitMac is not null');
@@ -6623,7 +6679,7 @@ begin
       if Get_RecCount('select * from FixedCardInfo where CardCode='+IntToStr(intCard),AdoConDock)<1 then
         AdoConDock.Execute('insert into FixedCardInfo(CardCode,RoomCode) values('+InttoStr(intCard)+','+QuotedStr(recDev)+')');
       AdoConDock.Execute('insert into InPark(CardCode,RoomCode,CarNumber,InParkTime) values('+InttoStr(intCard)+','+QuotedStr(recDev)+','+QuotedStr(recDev)+','+QuotedStr(GetCmdTime(MidStr(devStr,27,12)))+')');
-    end;
+    end;}
 
   finally
     cmdBusy := false;
@@ -6749,6 +6805,7 @@ procedure TMainForm.GetUnitCallOpenDoor(devStr:string);
 var
   cardType:Integer;
   unitStr,userStr,recDev,roomDev:string;
+  RoomCode,RecTime:string;
 begin
   try
     cardType:=8;
@@ -6764,6 +6821,7 @@ begin
     userStr := MidStr(devStr,17,6);
     userStr := GetUserNO4(userStr);
     roomDev := unitStr+'-'+userStr;
+    RoomCode := roomDev;
 
     RefreshRec(AdoQryAddr,'select * from t_addr where DevNO='+QuotedStr(roomDev));
     roomDev := AdoQryAddr.FieldByName('AddrName').AsString + '('+roomDev+')';
@@ -6773,15 +6831,24 @@ begin
     AdoQryCardRec.FieldByName('CardNO').AsString   := roomDev;
     AdoQryCardRec.FieldByName('CardType').AsInteger:= cardType;
     AdoQryCardRec.FieldByName('RecDev').AsString   := recDev;
+
     if ComType=0 then
-      AdoQryCardRec.FieldByName('RecTime').AsString  := GetCmdTime(MidStr(devStr,27,12))
+      RecTime := GetCmdTime(MidStr(devStr,27,12))
     else if ComType=1 then
-      AdoQryCardRec.FieldByName('RecTime').AsString  := FormatDateTime('YYYY-MM-DD hh:mm',Now());
+      RecTime := FormatDateTime('YYYY-MM-DD hh:mm',Now());
+    AdoQryCardRec.FieldByName('RecTime').AsString := RecTime;
+
     AdoQryCardRec.Post;
     RefreshRec(AdoQryCardRec,'select * from t_CardRec order by RecTime DESC,ID DESC');
 
     AdoQryCardRec.First;
     CurrentID:=AdoQryCardRec.FieldByName('ID').AsInteger;
+
+    if PoliceDocking='true' then
+    begin
+      AdoPolice.Execute('insert into InPark(OwnerName,RoomCode,InParkTime) values('+QuotedStr('主机呼叫开锁')+','+QuotedStr(RoomCode)+','+QuotedStr(RecTime)+')');
+    end;
+
   finally
     cmdBusy := false;
     mmRcvCmd.Lines.Delete(0);
@@ -6888,6 +6955,7 @@ procedure TMainForm.GetPwdOpenDoor(devStr:string);
 var
   unitStr,userStr,recDev,roomDev:string;
   cardType:Integer;
+  RoomCode,RecTime:string;
 begin
   try
     cardType:=4;
@@ -6903,6 +6971,7 @@ begin
     userStr := MidStr(devStr,17,6);
     userStr := GetUserNO4(userStr);
     roomDev := unitStr+'-'+userStr;
+    RoomCode := roomDev;
 
     RefreshRec(AdoQryAddr,'select * from t_addr where DevNO='+QuotedStr(roomDev));
     roomDev := AdoQryAddr.FieldByName('AddrName').AsString + '('+roomDev+')';
@@ -6912,15 +6981,24 @@ begin
     AdoQryCardRec.FieldByName('CardNO').AsString   := roomDev;
     AdoQryCardRec.FieldByName('CardType').AsInteger:= cardType;
     AdoQryCardRec.FieldByName('RecDev').AsString   := recDev;
+
     if ComType=0 then
-      AdoQryCardRec.FieldByName('RecTime').AsString  := GetCmdTime(MidStr(devStr,27,12))
+      RecTime := GetCmdTime(MidStr(devStr,27,12))
     else if ComType=1 then
-      AdoQryCardRec.FieldByName('RecTime').AsString  := FormatDateTime('YYYY-MM-DD hh:mm',Now());
+      RecTime := FormatDateTime('YYYY-MM-DD hh:mm',Now());
+    AdoQryCardRec.FieldByName('RecTime').AsString := RecTime;
+
     AdoQryCardRec.Post;
     RefreshRec(AdoQryCardRec,'select * from t_CardRec order by RecTime DESC,ID DESC');
 
     AdoQryCardRec.First;
     CurrentID:=AdoQryCardRec.FieldByName('ID').AsInteger;
+
+    if PoliceDocking='true' then
+    begin
+      AdoPolice.Execute('insert into InPark(OwnerName,RoomCode,InParkTime) values('+QuotedStr('主机密码开锁')+','+QuotedStr(RoomCode)+','+QuotedStr(RecTime)+')');
+    end;
+
   finally
     cmdBusy := false;
     mmRcvCmd.Lines.Delete(0);
@@ -8496,6 +8574,8 @@ end;
 function TMainForm.D_Card_T_Unit(PersonName,CardNO,UserMac,CmdHead,ValidTime:string;CardType:Integer):Boolean;
 var
   UnitNo,tp,s:string;
+  IntCard:Integer;
+  RoomCode:string;
 begin
   with AdoQryUnitMac do
   begin
@@ -8507,6 +8587,7 @@ begin
     while not EOF do
     begin
       UnitNO:=FieldByName('UnitNO').AsString;
+      RoomCode := UnitNO+'-'+UserMac;
       if CardType=2 then
         tp:='0A903A'
       else
@@ -8524,6 +8605,9 @@ begin
       else begin
         AdoCon.Execute('update t_card set CardType='+IntToStr(CardType)+',userMac='+QuotedStr(UserMac)+' where CardNO='+QuotedStr(CardNO)+' and unitMac='+QuotedStr(UnitNO));
       end;
+
+      IntCard := StrToInt(CardNO);
+      A_Card_T_FixedCardInfo(IntCard,RoomCode,PersonName);
 
       Next;
     end;
@@ -8567,6 +8651,22 @@ begin
 
   Result := true;
 end;
+
+//==往固定卡人员资料表中添加数据==
+function TMainForm.A_Card_T_FixedCardInfo(CardCode:Integer;RoomCode,OwnerName:string):Boolean;
+begin
+  if PoliceDocking='true' then
+  begin
+    if Get_RecCount('select * from FixedCardInfo where CardCode='+IntToStr(CardCode)+' and RoomCode='+QuotedStr(RoomCode),AdoPolice)<1 then
+    begin
+      AdoPolice.Execute('insert into FixedCardInfo(CardCode,RoomCode,OwnerName) values('+IntToStr(CardCode)+','+QuotedStr(RoomCode)+','+QuotedStr(OwnerName)+')');
+    end
+    else begin
+      AdoPolice.Execute('update FixedCardInfo set OwnerName='+QuotedStr(OwnerName));
+    end;
+  end;
+end;
+
 
 
 //=====8.5 其他函数(不使用)=====

@@ -50,6 +50,7 @@ var
   //其他全局量
   AppName:string;
   DataDocking:string;
+  PoliceDocking:string;
   Test:string;
   PhoneDoor:string;
 
